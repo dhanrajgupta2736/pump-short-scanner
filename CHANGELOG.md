@@ -4,6 +4,20 @@ A running, plain-language history of all changes made to the Pump Short Scanner 
 
 ---
 
+## [2026-08-23] - Fix: Gate ATH Multiple on Active ATH Proximity to Exclude Legacy Large-Caps
+
+### Fixed
+- **Resolved False Positives in 4-Criteria Filter**: Diagnosed why stable large-caps like XRP, Chainlink, Cardano, and Zcash previously appeared in the "Meeting All 4 Criteria" table despite only having 1.35x–1.65x 30-day moves:
+  - The 30-day percentage math was correct (e.g. XRP +35.2% $\rightarrow$ 1.35x, evaluating to `thirty_day_multiple_ok = False`).
+  - However, the second branch of the `OR` logic (`ath_multiple >= 10`) was previously calculated as `current_price / atl` against ancient historical all-time lows from 2014–2020.
+  - Because mature coins like XRP (554x from 2014 ATL), Zcash (50x), Chainlink (76x), and Cardano (11.6x) are historically above their launch lows, `ath_multiple_ok` returned `True`, allowing them to bypass the 30-day 5x pump requirement via the `OR` expression.
+- **Gated ATH Multiple on Active ATH Proximity (`scanner/coingecko_client.py`)**:
+  - `ath_multiple` is now only calculated if the coin is actively trading near its All-Time High (`ath_change_percentage >= -20%`).
+  - For coins trading well below their historical ATH (e.g. XRP down -59%, ADA down -93%, ZEC down -80%, LINK down -78%), `ath_multiple` is set to `0.0`, ensuring they cannot qualify as active parabolic pump candidates.
+- **Verification**: Confirmed that XRP, Chainlink, Cardano, and Zcash are now completely excluded from the filter table, while genuine parabolic movers (e.g. Bitway `BTW` with +515.4% 30d gain / 6.15x multiple) and active ATH runners are correctly identified.
+
+---
+
 ## [2026-08-23] - Scope Realignment: CoinGecko Top 1000 Scanner & Manual Forward-Testing
 
 ### Added

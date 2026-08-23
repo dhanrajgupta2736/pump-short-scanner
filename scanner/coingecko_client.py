@@ -54,7 +54,7 @@ class CoinGeckoClient:
         self,
         max_pages: int = 4,
         per_page: int = 250,
-        delay_seconds: float = 1.5,
+        delay_seconds: float = 2.0,
     ) -> List[Dict[str, Any]]:
         """
         Fetch the top N coins by market cap (default 4 pages * 250 = Top 1000)
@@ -80,7 +80,7 @@ class CoinGeckoClient:
                 try:
                     response = self.session.get(url, params=params, timeout=self.timeout)
                     if response.status_code == 429:
-                        wait_time = 10 * attempt
+                        wait_time = 15 * attempt
                         logger.warning("CoinGecko rate limit (429) on page %d. Retrying in %ds...", page, wait_time)
                         time.sleep(wait_time)
                         continue
@@ -94,7 +94,7 @@ class CoinGeckoClient:
                     break
                 except requests.exceptions.RequestException as err:
                     logger.warning("Attempt %d failed for page %d: %s", attempt, page, err)
-                    time.sleep(2 * attempt)
+                    time.sleep(3 * attempt)
 
             if not success:
                 logger.error("Failed to fetch page %d after %d attempts.", page, max_retries)
@@ -114,6 +114,7 @@ class CoinGeckoClient:
 
         ath = float(item.get("ath") or 0.0)
         atl = float(item.get("atl") or 0.0)
+        ath_change_pct = float(item.get("ath_change_percentage") or 0.0)
         pct_30d = item.get("price_change_percentage_30d_in_currency")
         pct_30d = float(pct_30d) if pct_30d is not None else 0.0
 
@@ -124,8 +125,14 @@ class CoinGeckoClient:
         else:
             thirty_day_multiple = round(1.0 / (1.0 + abs(pct_30d) / 100.0), 2) if pct_30d > -100 else 0.0
 
-        # ATH multiple: multiple from all-time low to current price
-        ath_multiple = round(current_price / atl, 2) if atl > 0 else 0.0
+        # ATH multiple: multiple from base/ATL ONLY when the coin is currently near its ATH
+        # (e.g. within 20% of ATH). If a coin is down 60-95% from an ATH set years ago,
+        # its historical all-time gain does NOT constitute an active parabolic pump.
+        is_near_ath = ath_change_pct >= -20.0
+        if is_near_ath and atl > 0:
+            ath_multiple = round(current_price / atl, 2)
+        else:
+            ath_multiple = 0.0
 
         return {
             "id": item.get("id", ""),
@@ -136,6 +143,8 @@ class CoinGeckoClient:
             "fdv": fdv,
             "ath": ath,
             "atl": atl,
+            "ath_change_pct": ath_change_pct,
+            "is_near_ath": is_near_ath,
             "price_change_30d_pct": pct_30d,
             "ath_multiple": ath_multiple,
             "thirty_day_multiple": thirty_day_multiple,
