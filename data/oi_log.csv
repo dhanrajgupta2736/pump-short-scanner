@@ -1,0 +1,3 @@
+timestamp,coin_id,symbol,price_usd,open_interest_usd,funding_rate_8h,exchange,notes
+# Example manual log entry format:
+# 2026-08-23T12:00:00Z,bittensor,TAO,285.50,145000000,0.0105,Binance,Initial test logging
