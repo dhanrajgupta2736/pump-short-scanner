@@ -1,5 +1,6 @@
 """
 Multi-Exchange Automated Snapshot Logger for Forward-Test Candidates (Price, Open Interest, Funding Rate).
+Supports both local CSV logging and AWS Lambda serverless execution with Amazon S3 snapshot storage.
 
 DESIGN DECISION - DIRECT EXCHANGE APIS VS COINGLASS:
 We deliberately chose direct public exchange APIs (Binance, Bybit, OKX) over aggregators
@@ -16,11 +17,20 @@ older historical OI.
 
 import csv
 from datetime import datetime, timezone
+import io
+import json
 import logging
+import os
 from pathlib import Path
 import sys
 from typing import Any, Dict, List, Optional
 import requests
+
+# Conditional boto3 import (available by default in AWS Lambda runtime)
+try:
+    import boto3
+except ImportError:
+    boto3 = None
 
 # Ensure UTF-8 output encoding if supported by stream
 if hasattr(sys.stdout, "reconfigure"):
@@ -32,8 +42,9 @@ if hasattr(sys.stdout, "reconfigure"):
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-# File Paths
+# File & S3 Paths
 LOG_FILE_PATH = Path(__file__).resolve().parent.parent / "data" / "oi_funding_manual_log.csv"
+LOG_BUCKET_NAME = os.environ.get("LOG_BUCKET_NAME")
 
 # ==============================================================================
 # FORWARD-TEST CANDIDATE COINS (Placeholder list)
@@ -250,7 +261,7 @@ class OKXFuturesClient:
 
 
 def ensure_csv_structure(file_path: Path) -> None:
-    """Ensure data directory and updated 7-column CSV header exist."""
+    """Ensure data directory and updated 7-column CSV header exist for local mode."""
     file_path.parent.mkdir(parents=True, exist_ok=True)
     expected_header = ["date", "coin", "exchange", "price", "open_interest", "funding_rate", "notes"]
 
@@ -266,7 +277,6 @@ def ensure_csv_structure(file_path: Path) -> None:
         first_row = next(reader, None)
 
     if first_row and "exchange" not in first_row:
-        # Migrate old 6-column format to new 7-column format with default exchange='Binance'
         rows = []
         with open(file_path, mode="r", newline="", encoding="utf-8") as f:
             reader = csv.reader(f)
@@ -293,7 +303,7 @@ def append_log_row(
     funding_rate: Optional[float],
     notes: str = "auto",
 ) -> None:
-    """Append a single snapshot record to the forward-test CSV."""
+    """Append a single snapshot record to the local forward-test CSV."""
     price_val = "N/A"
     if price is not None:
         price_val = f"{price:.8f}".rstrip("0").rstrip(".") if price < 1 else f"{price:.4f}"
@@ -314,13 +324,62 @@ def append_log_row(
         ])
 
 
-def run_auto_logger(candidates: Optional[List[Dict[str, Any]]] = None) -> None:
+def upload_snapshot_to_s3(bucket_name: str, timestamp_utc: str, records: List[Dict[str, Any]]) -> str:
     """
-    Fetch current live Price, Open Interest, and Funding Rate across Binance, Bybit, and OKX,
-    display a comparison table, and append results to data/oi_funding_manual_log.csv.
+    Upload run snapshot to S3 as a timestamped CSV object (Option b).
+    Key format: snapshots/YYYY-MM-DD/snapshot_YYYYMMDD_HHMMSS.csv
+    """
+    if boto3 is None:
+        raise RuntimeError("boto3 is not installed or available for S3 upload.")
+
+    dt = datetime.fromisoformat(timestamp_utc.replace("Z", "+00:00"))
+    date_str = dt.strftime("%Y-%m-%d")
+    time_str = dt.strftime("%Y%m%d_%H%M%S")
+    object_key = f"snapshots/{date_str}/snapshot_{time_str}.csv"
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["date", "coin", "exchange", "price", "open_interest", "funding_rate", "notes"])
+
+    for r in records:
+        price = r.get("price")
+        price_val = (f"{price:.8f}".rstrip("0").rstrip(".") if price < 1 else f"{price:.4f}") if price is not None else "N/A"
+        oi = r.get("open_interest")
+        oi_val = f"{oi:.2f}" if oi is not None else "N/A"
+        fr = r.get("funding_rate")
+        fr_val = f"{fr:.8f}" if fr is not None else "N/A"
+
+        writer.writerow([
+            r.get("date"),
+            r.get("coin"),
+            r.get("exchange"),
+            price_val,
+            oi_val,
+            fr_val,
+            r.get("notes", "auto"),
+        ])
+
+    s3 = boto3.client("s3")
+    s3.put_object(
+        Bucket=bucket_name,
+        Key=object_key,
+        Body=output.getvalue().encode("utf-8"),
+        ContentType="text/csv",
+    )
+    return object_key
+
+
+def run_auto_logger(
+    candidates: Optional[List[Dict[str, Any]]] = None,
+    bucket_name: Optional[str] = None,
+) -> int:
+    """
+    Fetch current live Price, Open Interest, and Funding Rate across Binance, Bybit, and OKX.
+    If bucket_name (or LOG_BUCKET_NAME env var) is provided, uploads snapshot to S3.
+    Otherwise, appends to local data/oi_funding_manual_log.csv.
     """
     target_candidates = candidates or FORWARD_TEST_CANDIDATES
-    ensure_csv_structure(LOG_FILE_PATH)
+    target_bucket = bucket_name or os.environ.get("LOG_BUCKET_NAME")
 
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -328,7 +387,10 @@ def run_auto_logger(candidates: Optional[List[Dict[str, Any]]] = None) -> None:
     print("      📊 MULTI-EXCHANGE FORWARD-TEST AUTO-LOGGER (Binance / Bybit / OKX Public APIs)")
     print("=" * 105)
     print(f"Timestamp (UTC) : {now_utc}")
-    print(f"Target Log File : {LOG_FILE_PATH}")
+    if target_bucket:
+        print(f"Destination     : Amazon S3 (Bucket: {target_bucket})")
+    else:
+        print(f"Destination     : Local File ({LOG_FILE_PATH})")
     print(f"Candidates ({len(target_candidates)}) : {', '.join(c['coin'] for c in target_candidates)}")
     print("=" * 105)
 
@@ -336,7 +398,7 @@ def run_auto_logger(candidates: Optional[List[Dict[str, Any]]] = None) -> None:
     bybit_client = BybitFuturesClient()
     okx_client = OKXFuturesClient()
 
-    logged_count = 0
+    records: List[Dict[str, Any]] = []
 
     header = f"{'Coin':<8} {'Exchange':<10} {'Symbol / Ticker':<18} {'Price':<14} {'Open Interest':<18} {'OI (USD)':<14} {'Funding Rate':<14}"
     print(header)
@@ -364,7 +426,7 @@ def run_auto_logger(candidates: Optional[List[Dict[str, Any]]] = None) -> None:
             oi_usd = metrics.get("open_interest_usd")
             fr = metrics.get("funding_rate")
 
-            # Formatting
+            # Formatting for console display
             if price is not None:
                 price_str = f"${price:,.4f}" if price >= 1.0 else f"${price:.6f}"
             else:
@@ -380,21 +442,57 @@ def run_auto_logger(candidates: Optional[List[Dict[str, Any]]] = None) -> None:
 
             print(f"{coin:<8} {ex_name:<10} {sym:<18} {price_str:<14} {oi_str:<18} {oi_usd_str:<14} {fr_str:<14}")
 
-            # Append row to CSV
-            append_log_row(
-                file_path=LOG_FILE_PATH,
-                timestamp=now_utc,
-                coin_symbol=coin,
-                exchange=ex_name,
-                price=price,
-                open_interest=oi,
-                funding_rate=fr,
-                notes="auto",
-            )
-            logged_count += 1
+            record = {
+                "date": now_utc,
+                "coin": coin,
+                "exchange": ex_name,
+                "price": price,
+                "open_interest": oi,
+                "funding_rate": fr,
+                "notes": "auto",
+            }
+            records.append(record)
 
     print("-" * 105)
-    print(f"[+] Successfully logged {logged_count} snapshot record(s) across exchanges to {LOG_FILE_PATH.name}.\n")
+
+    if target_bucket:
+        try:
+            s3_key = upload_snapshot_to_s3(target_bucket, now_utc, records)
+            print(f"[+] Successfully uploaded {len(records)} record(s) to s3://{target_bucket}/{s3_key}\n")
+        except Exception as e:
+            print(f"[!] Error uploading snapshot to S3: {e}")
+            raise
+    else:
+        ensure_csv_structure(LOG_FILE_PATH)
+        for r in records:
+            append_log_row(
+                file_path=LOG_FILE_PATH,
+                timestamp=r["date"],
+                coin_symbol=r["coin"],
+                exchange=r["exchange"],
+                price=r["price"],
+                open_interest=r["open_interest"],
+                funding_rate=r["funding_rate"],
+                notes="auto",
+            )
+        print(f"[+] Successfully logged {len(records)} snapshot record(s) to {LOG_FILE_PATH.name}.\n")
+
+    return len(records)
+
+
+def lambda_handler(event: Optional[Dict[str, Any]] = None, context: Any = None) -> Dict[str, Any]:
+    """
+    AWS Lambda entry point for scheduled EventBridge execution.
+    """
+    logger.info("Lambda invocation started via EventBridge event: %s", json.dumps(event or {}))
+    logged_count = run_auto_logger()
+    return {
+        "statusCode": 200,
+        "body": json.dumps({
+            "message": f"Successfully logged {logged_count} derivative snapshot records to S3.",
+            "records_count": logged_count,
+        }),
+    }
 
 
 if __name__ == "__main__":
