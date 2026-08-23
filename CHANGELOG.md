@@ -4,6 +4,16 @@ A running, plain-language history of all changes made to the Pump Short Scanner 
 
 ---
 
+## [2026-08-23] - Fix: Log "N/A" for Failed API Metrics Instead of Defaulting to 0.0 (`scanner/auto_logger.py`)
+
+### Fixed
+- **Distinguish API Failures from Zero Readings**:
+  - Previously, if an exchange API call failed for `funding_rate` or `open_interest`, the clients silently defaulted to `0.0`. This made network/API errors indistinguishable from legitimate market readings of 0% funding rate or zero open interest.
+  - Updated `BinanceFuturesClient`, `BybitFuturesClient`, and `OKXFuturesClient` to return `None` upon fetch errors.
+  - Updated CSV logger and console output to write `"N/A"` for failed metrics so historical data analysis can reliably distinguish true zero values from missing API data.
+
+---
+
 ## [2026-08-23] - Feature: Multi-Exchange Price, OI & Funding Rate Logger (Binance, Bybit, OKX)
 
 ### Added
@@ -29,7 +39,6 @@ A running, plain-language history of all changes made to the Pump Short Scanner 
   - Added a `24h Volume` column to the Top Gainers table for instant liquidity assessment.
 - **Enhanced Rate-Limit Backoff (`scanner/coingecko_client.py`)**:
   - Increased base inter-page delay to 2.5s and configured exponential retry backoff (20s/40s/60s) for CoinGecko free tier HTTP 429 responses.
-  - *Note*: Under heavy public API congestion, the scanner gracefully continues with partial data (e.g. 750 or 1000 coins) without crashing.
 
 ---
 

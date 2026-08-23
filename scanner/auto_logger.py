@@ -80,33 +80,38 @@ class BinanceFuturesClient:
                 print(f"[!] Binance: '{symbol}' is not listed on USDT-M Futures. Skipping.")
                 return None
             r_p.raise_for_status()
-            price = float(r_p.json().get("price") or 0.0)
+            raw_price = r_p.json().get("price")
+            price = float(raw_price) if raw_price is not None else None
         except Exception as e:
-            print(f"[!] Binance error for '{symbol}': {e}")
+            print(f"[!] Binance price error for '{symbol}': {e}")
             return None
 
         # 2. Funding Rate
         try:
             r_f = self.session.get(f"{self.BASE_URL}/fapi/v1/premiumIndex", params={"symbol": symbol}, timeout=self.timeout)
             r_f.raise_for_status()
-            funding_rate = float(r_f.json().get("lastFundingRate") or 0.0)
+            raw_fr = r_f.json().get("lastFundingRate")
+            funding_rate = float(raw_fr) if raw_fr is not None else None
         except Exception:
-            funding_rate = 0.0
+            funding_rate = None
 
         # 3. Open Interest
         try:
             r_oi = self.session.get(f"{self.BASE_URL}/fapi/v1/openInterest", params={"symbol": symbol}, timeout=self.timeout)
             r_oi.raise_for_status()
-            open_interest = float(r_oi.json().get("openInterest") or 0.0)
+            raw_oi = r_oi.json().get("openInterest")
+            open_interest = float(raw_oi) if raw_oi is not None else None
         except Exception:
-            open_interest = 0.0
+            open_interest = None
+
+        oi_usd = (open_interest * price) if (open_interest is not None and price is not None) else None
 
         return {
             "exchange": "Binance",
             "symbol": symbol,
             "price": price,
             "open_interest": open_interest,
-            "open_interest_usd": open_interest * price,
+            "open_interest_usd": oi_usd,
             "funding_rate": funding_rate,
         }
 
@@ -135,10 +140,22 @@ class BybitFuturesClient:
                 return None
 
             item = items[0]
-            price = float(item.get("lastPrice") or 0.0)
-            funding_rate = float(item.get("fundingRate") or 0.0)
-            open_interest = float(item.get("openInterest") or 0.0)
-            oi_usd = float(item.get("openInterestValue") or (open_interest * price))
+            raw_price = item.get("lastPrice")
+            price = float(raw_price) if (raw_price is not None and raw_price != "") else None
+
+            raw_fr = item.get("fundingRate")
+            funding_rate = float(raw_fr) if (raw_fr is not None and raw_fr != "") else None
+
+            raw_oi = item.get("openInterest")
+            open_interest = float(raw_oi) if (raw_oi is not None and raw_oi != "") else None
+
+            raw_oi_usd = item.get("openInterestValue")
+            if raw_oi_usd is not None and raw_oi_usd != "":
+                oi_usd = float(raw_oi_usd)
+            elif open_interest is not None and price is not None:
+                oi_usd = open_interest * price
+            else:
+                oi_usd = None
 
             return {
                 "exchange": "Bybit",
@@ -172,7 +189,8 @@ class OKXFuturesClient:
             if not t_data:
                 print(f"[!] OKX: '{inst_id}' not found on Perpetual Swap. Skipping.")
                 return None
-            price = float(t_data[0].get("last") or 0.0)
+            raw_price = t_data[0].get("last")
+            price = float(raw_price) if (raw_price is not None and raw_price != "") else None
         except requests.exceptions.ConnectTimeout:
             print(f"[!] OKX: Connection timed out for '{inst_id}' (regional restriction). Skipping.")
             return None
@@ -189,11 +207,21 @@ class OKXFuturesClient:
             )
             r_oi.raise_for_status()
             oi_data = r_oi.json().get("data", [])
-            open_interest = float(oi_data[0].get("oi") or 0.0) if oi_data else 0.0
-            oi_usd = float(oi_data[0].get("oiCcy") or (open_interest * price)) if oi_data else (open_interest * price)
+            if oi_data and oi_data[0].get("oi") is not None and oi_data[0].get("oi") != "":
+                open_interest = float(oi_data[0]["oi"])
+                raw_oi_usd = oi_data[0].get("oiCcy")
+                if raw_oi_usd is not None and raw_oi_usd != "":
+                    oi_usd = float(raw_oi_usd)
+                elif open_interest is not None and price is not None:
+                    oi_usd = open_interest * price
+                else:
+                    oi_usd = None
+            else:
+                open_interest = None
+                oi_usd = None
         except Exception:
-            open_interest = 0.0
-            oi_usd = 0.0
+            open_interest = None
+            oi_usd = None
 
         # 3. Funding Rate
         try:
@@ -204,9 +232,12 @@ class OKXFuturesClient:
             )
             r_f.raise_for_status()
             f_data = r_f.json().get("data", [])
-            funding_rate = float(f_data[0].get("fundingRate") or 0.0) if f_data else 0.0
+            if f_data and f_data[0].get("fundingRate") is not None and f_data[0].get("fundingRate") != "":
+                funding_rate = float(f_data[0]["fundingRate"])
+            else:
+                funding_rate = None
         except Exception:
-            funding_rate = 0.0
+            funding_rate = None
 
         return {
             "exchange": "OKX",
@@ -257,21 +288,28 @@ def append_log_row(
     timestamp: str,
     coin_symbol: str,
     exchange: str,
-    price: float,
-    open_interest: float,
-    funding_rate: float,
+    price: Optional[float],
+    open_interest: Optional[float],
+    funding_rate: Optional[float],
     notes: str = "auto",
 ) -> None:
     """Append a single snapshot record to the forward-test CSV."""
+    price_val = "N/A"
+    if price is not None:
+        price_val = f"{price:.8f}".rstrip("0").rstrip(".") if price < 1 else f"{price:.4f}"
+
+    oi_val = f"{open_interest:.2f}" if open_interest is not None else "N/A"
+    fr_val = f"{funding_rate:.8f}" if funding_rate is not None else "N/A"
+
     with open(file_path, mode="a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow([
             timestamp,
             coin_symbol,
             exchange,
-            f"{price:.8f}".rstrip("0").rstrip(".") if price < 1 else f"{price:.4f}",
-            f"{open_interest:.2f}",
-            f"{funding_rate:.8f}",
+            price_val,
+            oi_val,
+            fr_val,
             notes,
         ])
 
@@ -321,17 +359,24 @@ def run_auto_logger(candidates: Optional[List[Dict[str, Any]]] = None) -> None:
             if metrics is None:
                 continue
 
-            price = metrics["price"]
-            oi = metrics["open_interest"]
-            oi_usd = metrics["open_interest_usd"]
-            fr = metrics["funding_rate"]
-            fr_pct = fr * 100.0
+            price = metrics.get("price")
+            oi = metrics.get("open_interest")
+            oi_usd = metrics.get("open_interest_usd")
+            fr = metrics.get("funding_rate")
 
             # Formatting
-            price_str = f"${price:,.4f}" if price >= 1.0 else f"${price:.6f}"
-            oi_str = f"{oi:,.0f}"
-            oi_usd_str = f"${oi_usd / 1e6:.2f}M" if oi_usd >= 1e6 else f"${oi_usd:,.0f}"
-            fr_str = f"{fr_pct:+.4f}%"
+            if price is not None:
+                price_str = f"${price:,.4f}" if price >= 1.0 else f"${price:.6f}"
+            else:
+                price_str = "N/A"
+
+            oi_str = f"{oi:,.0f}" if oi is not None else "N/A"
+            if oi_usd is not None:
+                oi_usd_str = f"${oi_usd / 1e6:.2f}M" if oi_usd >= 1e6 else f"${oi_usd:,.0f}"
+            else:
+                oi_usd_str = "N/A"
+
+            fr_str = f"{fr * 100.0:+.4f}%" if fr is not None else "N/A"
 
             print(f"{coin:<8} {ex_name:<10} {sym:<18} {price_str:<14} {oi_str:<18} {oi_usd_str:<14} {fr_str:<14}")
 
