@@ -13,10 +13,11 @@ pump-short-scanner/
 ├── main.py                       # CLI entry point: scans Top 1000 coins and displays filtered candidates
 ├── requirements.txt              # Python package dependencies (requests)
 ├── data/
-│   ├── oi_funding_manual_log.csv # Manual forward-test template for daily price/OI/funding tracking
+│   ├── oi_funding_manual_log.csv # Forward-test log for daily price/OI/funding tracking
 │   └── oi_log.csv                # Legacy placeholder CSV
 └── scanner/
-    ├── __init__.py               # Package initializer exporting client and filter utilities
+    ├── __init__.py               # Package initializer exporting client, filter, and logger utilities
+    ├── auto_logger.py            # Automated snapshot logger for Binance USDT-M Futures Price/OI/Funding
     ├── coingecko_client.py       # CoinGecko client with Top 1000 pagination & rate-limit handling
     └── filters.py                # 4-criteria evaluation engine and candidate filter functions
 ```
@@ -26,7 +27,7 @@ pump-short-scanner/
 ## File & Directory Reference
 
 ### Root Directory
-- **`README.md`**: Project mission, 4-criteria rules, manual forward-testing instructions, and current research roadmap.
+- **`README.md`**: Project mission, 4-criteria rules, scanner execution, and auto-logger guide.
 - **`PROJECT_STRUCTURE.md`**: This document, outlining the structural blueprint of the project.
 - **`CHANGELOG.md`**: Plain-language dated history of project features, updates, and fixes.
 - **`config.py`**: Declares user-configurable thresholds:
@@ -42,11 +43,12 @@ pump-short-scanner/
 - **`.gitignore`**: Specifies untracked files (virtual environments, cache, sensitive configs).
 
 ### `scanner/` Directory
-- **`__init__.py`**: Exposes core classes and functions (`CoinGeckoClient`, `evaluate_coin`, `filter_coins`).
+- **`__init__.py`**: Exposes core classes and functions (`BinanceFuturesClient`, `CoinGeckoClient`, `evaluate_coin`, `filter_coins`, `run_auto_logger`).
+- **`auto_logger.py`**: Standalone tool that queries public Binance USDT-M Perpetual Futures REST endpoints for Price, Funding Rate, and Open Interest, displaying a summary table and appending snapshot rows to `data/oi_funding_manual_log.csv`.
 - **`coingecko_client.py`**: Interfaces with the CoinGecko public free API (`/coins/markets`) without requiring an API key. Handles paginated fetching (4 pages $\times$ 250 coins = Top 1000), polite rate-limiting pauses, retry logic, and data normalization (prices, market caps, FDVs, ATH, ATL, 30d change, 24h volume). Safely returns `None` for missing data.
 - **`filters.py`**: Pure logic module implementing the 4-criteria filter rule:
   $$\text{Match} = (\text{ATH Multiple} \ge T_{\text{ath}} \lor \text{30d Multiple} \ge T_{\text{30d}}) \land \text{Market Cap} \ge T_{\text{mcap}} \land \text{FDV} \ge T_{\text{fdv}}$$
 
 ### `data/` Directory
-- **`oi_funding_manual_log.csv`**: Manual forward-testing template with header `date,coin,price,open_interest,funding_rate,notes`. Hand-maintained by the user during the 1–2 week validation phase.
+- **`oi_funding_manual_log.csv`**: Forward-testing CSV log with header `date,coin,price,open_interest,funding_rate,notes`. Populated by both `scanner/auto_logger.py` and manual entries during the validation phase.
 - **`oi_log.csv`**: Legacy data placeholder.

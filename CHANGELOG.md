@@ -4,6 +4,16 @@ A running, plain-language history of all changes made to the Pump Short Scanner 
 
 ---
 
+## [2026-08-23] - Feature: Automated Binance Futures Price, OI & Funding Rate Logger (`scanner/auto_logger.py`)
+
+### Added
+- **Automated Snapshot Logger (`scanner/auto_logger.py`)**: Built a standalone script to fetch live Price, Funding Rate, and Open Interest directly from Binance USDT-M Perpetual Futures public endpoints (no API key required) and append records to `data/oi_funding_manual_log.csv`.
+- **Graceful Unlisted Symbol Handling**: Automatically detects and skips coins not listed on Binance Futures with a clear warning without crashing.
+- **Unified CSV Logging**: Appends rows matching the existing CSV header (`date,coin,price,open_interest,funding_rate,notes`), using `"auto"` in the notes column to distinguish automated runs from manual entries.
+- **Data Retention Limitation Notice**: Documented that Binance's free public Open Interest API only retains 30 days of historical data, meaning the script records live forward snapshots going forward and cannot backfill older historical OI.
+
+---
+
 ## [2026-08-23] - Improvements: True ATH Multiples, Volume Floor on Gainers & API Rate-Limit Handling
 
 ### Fixed
