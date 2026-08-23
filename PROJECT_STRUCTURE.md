@@ -8,16 +8,16 @@ pump-short-scanner/
 ├── .gitignore                    # Files and folders excluded from Git version control
 ├── CHANGELOG.md                  # Running chronological log of all changes and rationale
 ├── PROJECT_STRUCTURE.md          # Overview of codebase layout and file responsibilities
-├── README.md                     # High-level project documentation, setup, and forward-test guide
+├── README.md                     # Project documentation, setup, and 24/7 AWS deployment guide
 ├── config.py                     # Central configuration constants, thresholds, and target lists
 ├── main.py                       # CLI entry point: scans Top 1000 coins and displays filtered candidates
-├── requirements.txt              # Python package dependencies (requests)
+├── requirements.txt              # Python package dependencies (requests, boto3)
 ├── data/
 │   ├── oi_funding_manual_log.csv # Multi-exchange forward-test log for price/OI/funding tracking
 │   └── oi_log.csv                # Legacy placeholder CSV
 └── scanner/
     ├── __init__.py               # Package initializer exporting clients, filters, and auto-logger
-    ├── auto_logger.py            # Multi-exchange snapshot logger (Binance, Bybit, OKX Futures APIs)
+    ├── auto_logger.py            # Multi-exchange snapshot logger & AWS Lambda handler (S3 output)
     ├── coingecko_client.py       # CoinGecko client with Top 1000 pagination & rate-limit handling
     └── filters.py                # 4-criteria evaluation engine and candidate filter functions
 ```
@@ -27,7 +27,7 @@ pump-short-scanner/
 ## File & Directory Reference
 
 ### Root Directory
-- **`README.md`**: Project mission, 4-criteria rules, scanner execution, and multi-exchange auto-logger guide.
+- **`README.md`**: Project mission, 4-criteria rules, scanner execution, and AWS Serverless 24/7 deployment guide.
 - **`PROJECT_STRUCTURE.md`**: This document, outlining the structural blueprint of the project.
 - **`CHANGELOG.md`**: Plain-language dated history of project features, updates, and fixes.
 - **`config.py`**: Declares user-configurable thresholds:
@@ -38,17 +38,17 @@ pump-short-scanner/
   - `MIN_GAINERS_VOLUME_USD`: 24h trading volume floor for Top Gainers list ($1M default).
   - `COINGECKO_BASE_URL` & `REQUEST_TIMEOUT_SECONDS`: Connection settings.
 - **`main.py`**: Orchestrates data fetching across CoinGecko's Top 1000 universe, evaluates each asset against `scanner.filters`, and renders a console summary table of matching coins and liquid top 30-day gainers.
-- **`requirements.txt`**: Minimal project dependencies (`requests`).
+- **`requirements.txt`**: Minimal project dependencies (`requests`, `boto3`).
 - **`.env.example`**: Template for future secrets (Telegram Bot token placeholder).
 - **`.gitignore`**: Specifies untracked files (virtual environments, cache, sensitive configs).
 
 ### `scanner/` Directory
-- **`__init__.py`**: Exposes core classes and functions (`BinanceFuturesClient`, `BybitFuturesClient`, `OKXFuturesClient`, `CoinGeckoClient`, `evaluate_coin`, `filter_coins`, `run_auto_logger`).
-- **`auto_logger.py`**: Multi-exchange snapshot tool that queries public **Binance USDT-M**, **Bybit Linear Futures (v5)**, and **OKX Perpetual Swaps (v5)** REST endpoints for Price, Funding Rate, and Open Interest, logging rows to `data/oi_funding_manual_log.csv`.
+- **`__init__.py`**: Exposes core classes and functions (`BinanceFuturesClient`, `BybitFuturesClient`, `OKXFuturesClient`, `CoinGeckoClient`, `evaluate_coin`, `filter_coins`, `lambda_handler`, `run_auto_logger`).
+- **`auto_logger.py`**: Multi-exchange snapshot tool that queries public **Binance USDT-M**, **Bybit Linear Futures (v5)**, and **OKX Perpetual Swaps (v5)** REST endpoints. Implements `lambda_handler()` to run seamlessly on AWS Lambda with automated uploads to Amazon S3, while maintaining local CSV logging when executed without S3.
 - **`coingecko_client.py`**: Interfaces with the CoinGecko public free API (`/coins/markets`) without requiring an API key. Handles paginated fetching (4 pages $\times$ 250 coins = Top 1000), polite rate-limiting pauses, retry logic, and data normalization (prices, market caps, FDVs, ATH, ATL, 30d change, 24h volume). Safely returns `None` for missing data.
 - **`filters.py`**: Pure logic module implementing the 4-criteria filter rule:
   $$\text{Match} = (\text{ATH Multiple} \ge T_{\text{ath}} \lor \text{30d Multiple} \ge T_{\text{30d}}) \land \text{Market Cap} \ge T_{\text{mcap}} \land \text{FDV} \ge T_{\text{fdv}}$$
 
 ### `data/` Directory
-- **`oi_funding_manual_log.csv`**: Multi-exchange forward-testing CSV log with header `date,coin,exchange,price,open_interest,funding_rate,notes`. Populated by `scanner/auto_logger.py` and manual entries to compare derivatives metrics across exchanges.
+- **`oi_funding_manual_log.csv`**: Multi-exchange forward-testing CSV log with header `date,coin,exchange,price,open_interest,funding_rate,notes`. Populated by `scanner/auto_logger.py` in local mode and manual entries.
 - **`oi_log.csv`**: Legacy data placeholder.
