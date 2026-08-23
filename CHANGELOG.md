@@ -4,6 +4,22 @@ A running, plain-language history of all changes made to the Pump Short Scanner 
 
 ---
 
+## [2026-08-23] - Fix: Standardize OKX Open Interest Units to Base Currency (`oiCcy`)
+
+### Fixed
+- **OKX Open Interest Contract Multiplier / Unit Mismatch**:
+  - Diagnosed why OKX Open Interest previously appeared ~1000x smaller than Binance/Bybit (e.g. OKX reported `3,384,522` for BOME while Binance reported `10,671,160,756` and Bybit reported `3,395,543,800`).
+  - **Findings from OKX API Spec**:
+    - OKX's `/api/v5/public/open-interest` returns `oi` in **contracts** (where 1 contract = `ctVal` base coins, e.g. 1 contract = 1,000 BOME).
+    - OKX *also* returns `oiCcy`, which is the total Open Interest denominated in **underlying base-currency units** (e.g. `3,274,263,000` BOME coins), matching Binance and Bybit.
+    - Previously, `OKXFuturesClient` read `oi` (contracts) for Open Interest and mistakenly read `oiCcy` as USD.
+  - **Resolution (`scanner/auto_logger.py`)**:
+    - Updated `OKXFuturesClient` to use `oiCcy` for base-currency `open_interest` and `oiUsd` for USD notional value.
+    - Verified with a live Lambda invocation that OKX Open Interest now aligns across all venues (e.g. BOME: Binance 10.56B, Bybit 3.37B, OKX 3.27B).
+    - Redeployed Lambda function `pump-short-scanner-auto-logger` on AWS in `ap-south-1`.
+
+---
+
 ## [2026-08-23] - Infrastructure: Serverless 24/7 AWS Deployment (Lambda + S3 + EventBridge)
 
 ### Added
@@ -27,7 +43,6 @@ A running, plain-language history of all changes made to the Pump Short Scanner 
 
 ### Fixed
 - **Distinguish API Failures from Zero Readings**:
-  - Previously, if an exchange API call failed for `funding_rate` or `open_interest`, the clients silently defaulted to `0.0`. This made network/API errors indistinguishable from legitimate market readings of 0% funding rate or zero open interest.
   - Updated `BinanceFuturesClient`, `BybitFuturesClient`, and `OKXFuturesClient` to return `None` upon fetch errors.
   - Updated CSV logger and console output to write `"N/A"` for failed metrics so historical data analysis can reliably distinguish true zero values from missing API data.
 
@@ -51,6 +66,14 @@ A running, plain-language history of all changes made to the Pump Short Scanner 
 
 ### Added
 - **Liquidity Floor for 30-Day Gainers (`config.py` & `main.py`)**: Added `MIN_GAINERS_VOLUME_USD = 1_000_000` ($1M USD 24h trading volume floor).
+
+---
+
+## [2026-08-23] - Fix: Gate ATH Multiple on Active ATH Proximity to Exclude Legacy Large-Caps
+
+### Fixed
+- **Resolved False Positives in 4-Criteria Filter**: Diagnosed why stable large-caps like XRP, Chainlink, Cardano, and Zcash previously appeared in the "Meeting All 4 Criteria" table despite only having 1.35x–1.65x 30-day moves.
+- **Gated ATH Multiple on Active ATH Proximity (`scanner/coingecko_client.py`)**: `ath_multiple` is now only calculated if the coin is actively trading near its All-Time High (`ath_change_percentage >= -20%`).
 
 ---
 

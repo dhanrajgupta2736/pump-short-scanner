@@ -106,7 +106,7 @@ class BinanceFuturesClient:
         except Exception:
             funding_rate = None
 
-        # 3. Open Interest
+        # 3. Open Interest (returned in base-currency coin units)
         try:
             r_oi = self.session.get(f"{self.BASE_URL}/fapi/v1/openInterest", params={"symbol": symbol}, timeout=self.timeout)
             r_oi.raise_for_status()
@@ -157,6 +157,7 @@ class BybitFuturesClient:
             raw_fr = item.get("fundingRate")
             funding_rate = float(raw_fr) if (raw_fr is not None and raw_fr != "") else None
 
+            # Open interest is reported in base-currency coin units
             raw_oi = item.get("openInterest")
             open_interest = float(raw_oi) if (raw_oi is not None and raw_oi != "") else None
 
@@ -186,7 +187,7 @@ class OKXFuturesClient:
 
     BASE_URL = "https://www.okx.com"
 
-    def __init__(self, timeout: int = 3):
+    def __init__(self, timeout: int = 4):
         self.timeout = timeout
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "pump-short-scanner/1.0", "Accept": "application/json"})
@@ -210,6 +211,11 @@ class OKXFuturesClient:
             return None
 
         # 2. Open Interest
+        # Note on OKX OI Unit Standardisation:
+        # OKX returns:
+        # - 'oi': Number of contracts (e.g. 3.27M contracts)
+        # - 'oiCcy': Open Interest in Base Currency units (e.g. 3.27B BOME coins), matching Binance & Bybit
+        # - 'oiUsd': Open Interest USD notional value
         try:
             r_oi = self.session.get(
                 f"{self.BASE_URL}/api/v5/public/open-interest",
@@ -218,9 +224,20 @@ class OKXFuturesClient:
             )
             r_oi.raise_for_status()
             oi_data = r_oi.json().get("data", [])
-            if oi_data and oi_data[0].get("oi") is not None and oi_data[0].get("oi") != "":
-                open_interest = float(oi_data[0]["oi"])
-                raw_oi_usd = oi_data[0].get("oiCcy")
+            if oi_data:
+                item = oi_data[0]
+                raw_oi_ccy = item.get("oiCcy")
+                raw_oi_contracts = item.get("oi")
+                raw_oi_usd = item.get("oiUsd")
+
+                # Use base-currency open interest (oiCcy) for direct comparability with Binance/Bybit
+                if raw_oi_ccy is not None and raw_oi_ccy != "":
+                    open_interest = float(raw_oi_ccy)
+                elif raw_oi_contracts is not None and raw_oi_contracts != "":
+                    open_interest = float(raw_oi_contracts)
+                else:
+                    open_interest = None
+
                 if raw_oi_usd is not None and raw_oi_usd != "":
                     oi_usd = float(raw_oi_usd)
                 elif open_interest is not None and price is not None:
