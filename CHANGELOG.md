@@ -4,6 +4,25 @@ A running, plain-language history of all changes made to the Pump Short Scanner 
 
 ---
 
+## [2026-08-23] - Improvements: True ATH Multiples, Volume Floor on Gainers & API Rate-Limit Handling
+
+### Fixed
+- **Bitway (BTW) ATH Multiple Display**: Corrected `ath_multiple` computation so that coins with valid all-time low data display their genuine multiple (e.g. Bitway `BTW` now correctly displays `45.49x` rather than `0.0x`).
+- **Safe Null/Missing ATH Handling (`scanner/coingecko_client.py` & `scanner/filters.py`)**:
+  - Missing or null `ath`/`atl` values now explicitly return `None` (formatted as `N/A` in tables) rather than defaulting to `0.0`.
+  - In `filters.py`, missing ATH data safely evaluates to `ath_multiple_ok = False`, preventing false positives while allowing the coin to qualify on the 30-day multiple alone if eligible.
+
+### Added
+- **Liquidity Floor for 30-Day Gainers (`config.py` & `main.py`)**:
+  - Added `MIN_GAINERS_VOLUME_USD = 1_000_000` ($1M USD 24h trading volume floor).
+  - Excludes thin/illiquid micro-caps with artificial percentage spikes (e.g. `$ONION`, `SFTMX`) from the Top 15 Gainers list.
+  - Added a `24h Volume` column to the Top Gainers table for instant liquidity assessment.
+- **Enhanced Rate-Limit Backoff (`scanner/coingecko_client.py`)**:
+  - Increased base inter-page delay to 2.5s and configured exponential retry backoff (20s/40s/60s) for CoinGecko free tier HTTP 429 responses.
+  - *Note*: Under heavy public API congestion, the scanner gracefully continues with partial data (e.g. 750 or 1000 coins) without crashing.
+
+---
+
 ## [2026-08-23] - Fix: Gate ATH Multiple on Active ATH Proximity to Exclude Legacy Large-Caps
 
 ### Fixed
@@ -14,7 +33,6 @@ A running, plain-language history of all changes made to the Pump Short Scanner 
 - **Gated ATH Multiple on Active ATH Proximity (`scanner/coingecko_client.py`)**:
   - `ath_multiple` is now only calculated if the coin is actively trading near its All-Time High (`ath_change_percentage >= -20%`).
   - For coins trading well below their historical ATH (e.g. XRP down -59%, ADA down -93%, ZEC down -80%, LINK down -78%), `ath_multiple` is set to `0.0`, ensuring they cannot qualify as active parabolic pump candidates.
-- **Verification**: Confirmed that XRP, Chainlink, Cardano, and Zcash are now completely excluded from the filter table, while genuine parabolic movers (e.g. Bitway `BTW` with +515.4% 30d gain / 6.15x multiple) and active ATH runners are correctly identified.
 
 ---
 

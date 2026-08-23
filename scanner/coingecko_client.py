@@ -24,7 +24,7 @@ class CoinGeckoClient:
 
     def fetch_markets_data(self, coin_ids: List[str]) -> List[Dict[str, Any]]:
         """
-        Fetch market metrics (price, ATH, ATL, 30d change, market cap, FDV)
+        Fetch market metrics (price, ATH, ATL, 30d change, market cap, FDV, volume)
         for a specific list of CoinGecko coin IDs.
         """
         if not coin_ids:
@@ -54,12 +54,12 @@ class CoinGeckoClient:
         self,
         max_pages: int = 4,
         per_page: int = 250,
-        delay_seconds: float = 2.0,
+        delay_seconds: float = 2.5,
     ) -> List[Dict[str, Any]]:
         """
         Fetch the top N coins by market cap (default 4 pages * 250 = Top 1000)
         using CoinGecko's free public /coins/markets endpoint with 30d price change.
-        Includes polite delays and retry logic to avoid rate limits.
+        Includes polite delays and exponential backoff retry logic for 429 rate limits.
         """
         all_coins: List[Dict[str, Any]] = []
         url = f"{self.base_url}/coins/markets"
@@ -80,8 +80,8 @@ class CoinGeckoClient:
                 try:
                     response = self.session.get(url, params=params, timeout=self.timeout)
                     if response.status_code == 429:
-                        wait_time = 15 * attempt
-                        logger.warning("CoinGecko rate limit (429) on page %d. Retrying in %ds...", page, wait_time)
+                        wait_time = 20 * attempt
+                        print(f"[*] CoinGecko rate limit (429) on page {page}. Retrying in {wait_time}s (attempt {attempt}/{max_retries})...")
                         time.sleep(wait_time)
                         continue
 
@@ -94,10 +94,10 @@ class CoinGeckoClient:
                     break
                 except requests.exceptions.RequestException as err:
                     logger.warning("Attempt %d failed for page %d: %s", attempt, page, err)
-                    time.sleep(3 * attempt)
+                    time.sleep(4 * attempt)
 
             if not success:
-                logger.error("Failed to fetch page %d after %d attempts.", page, max_retries)
+                print(f"[!] Warning: Failed to fetch page {page} after {max_retries} attempts. Continuing with available pages.")
 
             # Polite delay between paginated calls for free tier
             if page < max_pages:
@@ -109,12 +109,19 @@ class CoinGeckoClient:
         """Normalize raw CoinGecko market item into a clean dictionary."""
         current_price = float(item.get("current_price") or 0.0)
         market_cap = float(item.get("market_cap") or 0.0)
+        total_volume = float(item.get("total_volume") or 0.0)
         fdv = item.get("fully_diluted_valuation")
         fdv = float(fdv) if fdv is not None else market_cap
 
-        ath = float(item.get("ath") or 0.0)
-        atl = float(item.get("atl") or 0.0)
-        ath_change_pct = float(item.get("ath_change_percentage") or 0.0)
+        raw_ath = item.get("ath")
+        ath = float(raw_ath) if raw_ath is not None else None
+
+        raw_atl = item.get("atl")
+        atl = float(raw_atl) if raw_atl is not None else None
+
+        raw_ath_change = item.get("ath_change_percentage")
+        ath_change_pct = float(raw_ath_change) if raw_ath_change is not None else None
+
         pct_30d = item.get("price_change_percentage_30d_in_currency")
         pct_30d = float(pct_30d) if pct_30d is not None else 0.0
 
@@ -125,14 +132,16 @@ class CoinGeckoClient:
         else:
             thirty_day_multiple = round(1.0 / (1.0 + abs(pct_30d) / 100.0), 2) if pct_30d > -100 else 0.0
 
-        # ATH multiple: multiple from base/ATL ONLY when the coin is currently near its ATH
-        # (e.g. within 20% of ATH). If a coin is down 60-95% from an ATH set years ago,
-        # its historical all-time gain does NOT constitute an active parabolic pump.
-        is_near_ath = ath_change_pct >= -20.0
-        if is_near_ath and atl > 0:
+        # ATH multiple calculation
+        # If ATL or ATH is missing/None/0, ath_multiple is None (data unavailable)
+        # Otherwise, calculate multiple from ATL to current price (e.g. 45.49x for BTW)
+        if atl is not None and atl > 0 and current_price > 0:
             ath_multiple = round(current_price / atl, 2)
         else:
-            ath_multiple = 0.0
+            ath_multiple = None
+
+        # ATH proximity flag (within 20% of ATH)
+        is_near_ath = ath_change_pct is not None and ath_change_pct >= -20.0
 
         return {
             "id": item.get("id", ""),
@@ -140,6 +149,7 @@ class CoinGeckoClient:
             "name": item.get("name", ""),
             "current_price": current_price,
             "market_cap": market_cap,
+            "total_volume": total_volume,
             "fdv": fdv,
             "ath": ath,
             "atl": atl,

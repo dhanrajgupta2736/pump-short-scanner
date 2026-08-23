@@ -34,23 +34,19 @@ pump-short-scanner/
   - `MIN_FDV_USD`: Minimum fully diluted valuation required ($1B default).
   - `ATH_MULTIPLE_THRESHOLD`: Threshold for multiple from low/base ($10\times$ default).
   - `THIRTY_DAY_MULTIPLE_THRESHOLD`: Threshold for 30-day pump multiple ($5\times$ / +400% default).
+  - `MIN_GAINERS_VOLUME_USD`: 24h trading volume floor for Top Gainers list ($1M default).
   - `COINGECKO_BASE_URL` & `REQUEST_TIMEOUT_SECONDS`: Connection settings.
-- **`main.py`**: Orchestrates data fetching across CoinGecko's Top 1000 universe, evaluates each asset against `scanner.filters`, and renders a console summary table of matching coins and top 30-day gainers.
+- **`main.py`**: Orchestrates data fetching across CoinGecko's Top 1000 universe, evaluates each asset against `scanner.filters`, and renders a console summary table of matching coins and liquid top 30-day gainers.
 - **`requirements.txt`**: Minimal project dependencies (`requests`).
 - **`.env.example`**: Template for future secrets (Telegram Bot token placeholder).
 - **`.gitignore`**: Specifies untracked files (virtual environments, cache, sensitive configs).
 
 ### `scanner/` Directory
 - **`__init__.py`**: Exposes core classes and functions (`CoinGeckoClient`, `evaluate_coin`, `filter_coins`).
-- **`coingecko_client.py`**: Interfaces with the CoinGecko public free API (`/coins/markets`) without requiring an API key. Handles paginated fetching (4 pages $\times$ 250 coins = Top 1000), polite rate-limiting pauses, retry logic, and data normalization (prices, market caps, FDVs, ATH, ATL, 30d change).
+- **`coingecko_client.py`**: Interfaces with the CoinGecko public free API (`/coins/markets`) without requiring an API key. Handles paginated fetching (4 pages $\times$ 250 coins = Top 1000), polite rate-limiting pauses, retry logic, and data normalization (prices, market caps, FDVs, ATH, ATL, 30d change, 24h volume). Safely returns `None` for missing data.
 - **`filters.py`**: Pure logic module implementing the 4-criteria filter rule:
   $$\text{Match} = (\text{ATH Multiple} \ge T_{\text{ath}} \lor \text{30d Multiple} \ge T_{\text{30d}}) \land \text{Market Cap} \ge T_{\text{mcap}} \land \text{FDV} \ge T_{\text{fdv}}$$
 
 ### `data/` Directory
 - **`oi_funding_manual_log.csv`**: Manual forward-testing template with header `date,coin,price,open_interest,funding_rate,notes`. Hand-maintained by the user during the 1–2 week validation phase.
 - **`oi_log.csv`**: Legacy data placeholder.
-
----
-
-## 📌 Implementation Plan Status Note
-The broader automated derivatives architecture in `implementation_plan.md` is **PAUSED** pending completion of the manual forward-test in `data/oi_funding_manual_log.csv` to validate the OI and funding rate hypothesis with real forward-looking data.
