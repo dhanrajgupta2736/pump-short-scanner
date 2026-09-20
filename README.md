@@ -67,50 +67,72 @@ python scanner/auto_logger.py
 
 ## ☁️ Serverless 24/7 AWS Deployment
 
-The forward-test logger runs completely serverless on AWS without any always-on servers, incurring **$0.00 / month** on the AWS Free Tier.
+The system runs completely serverless on AWS across two coordinated jobs, incurring **$0.00 / month** on the AWS Free Tier.
 
 ```mermaid
-flowchart LR
-    EB[Amazon EventBridge\nSchedule: rate 4 hours] -->|Trigger| L[AWS Lambda Function\npump-short-scanner-auto-logger]
-    L -->|Direct REST APIs| EX[Binance / Bybit / OKX]
-    L -->|PutObject| S3[(Amazon S3 Bucket\npump-short-scanner-logs-dhanraj-7938)]
-    L -->|Logs| CW[CloudWatch Logs\n/aws/lambda/pump-short-scanner-auto-logger]
+flowchart TD
+    subgraph Job 1: Candidate Discovery [Daily Trigger: rate 1 day]
+        CG[CoinGecko /coins/markets Top 200] --> RT[Lambda: pump-short-scanner-rank-tracker]
+        S3_Hist_Old[(S3: rank_history/yesterday.json)] --> RT
+        RT --> S3_Hist_New[(S3: rank_history/today.json)]
+        RT --> Filter{4-Criteria Filter<br/>MCap > $500M<br/>FDV > $1B<br/>10x ATH or 5x 30d}
+        Filter -- Qualified --> WL_Update[Append to Watchlist]
+        S3_WL[(S3: active_watchlist.json)] --> WL_Update
+        WL_Update --> S3_WL
+    end
+
+    subgraph Job 2: Derivative Logging [4-Hour Trigger: rate 4 hours]
+        S3_WL --> AL[Lambda: pump-short-scanner-auto-logger]
+        AL --> Safeguard{Watchlist > 15 Coins?<br/>Cap at N=15 Recent}
+        Safeguard --> FetchEx[Query Binance, Bybit, OKX<br/>Price, OI, Funding Rate]
+        FetchEx --> S3_Snaps[(S3: snapshots/YYYY-MM-DD/)]
+        FetchEx --> CW[CloudWatch Logs]
+    end
 ```
 
 ### Deployed AWS Resources:
 - **AWS Region**: `ap-south-1` (Asia Pacific - Mumbai)
 - **S3 Bucket**: `pump-short-scanner-logs-dhanraj-7938` (Private, Block Public Access enabled)
-  - Object Key Format: `snapshots/YYYY-MM-DD/snapshot_YYYYMMDD_HHMMSS.csv`
-- **Lambda Function**: `pump-short-scanner-auto-logger`
+  - `active_watchlist.json`: Single source of truth for active forward-test candidates.
+  - `rank_history/YYYY-MM-DD.json`: Daily CoinGecko top-200 market snapshots.
+  - `snapshots/YYYY-MM-DD/snapshot_YYYYMMDD_HHMMSS.csv`: 4-hourly derivative logs.
+- **Job 1 Lambda**: `pump-short-scanner-rank-tracker`
+  - Runtime: `Python 3.12` | Memory: `128 MB` | Timeout: `120s`
+  - Handler: `rank_tracker.lambda_handler`
+  - Schedule: `rate(1 day)` via EventBridge (`pump-short-scanner-rank-tracker-schedule`)
+- **Job 2 Lambda**: `pump-short-scanner-auto-logger`
   - Runtime: `Python 3.12` | Memory: `128 MB` | Timeout: `60s`
   - Handler: `auto_logger.lambda_handler`
-  - Environment Variable: `LOG_BUCKET_NAME=pump-short-scanner-logs-dhanraj-7938`
-- **IAM Role**: `pump-short-scanner-lambda-role` (Scoped strictly to `s3:PutObject` on this bucket + CloudWatch Logs)
-- **EventBridge Rule**: `pump-short-scanner-auto-logger-schedule` (Schedule: `rate(4 hours)`)
+  - Schedule: `rate(4 hours)` via EventBridge (`pump-short-scanner-auto-logger-schedule`)
+- **IAM Role**: `pump-short-scanner-lambda-role` (Scoped strictly to `s3:GetObject`, `s3:PutObject`, and `s3:ListBucket` on the bucket + CloudWatch Logs)
+
+### Managing the Active Watchlist:
+`active_watchlist.json` stores all candidates currently tracked for derivative logging.
+- **Automated**: Job 1 checks daily for coins newly entering CoinGecko's Top 200 that meet the 4-criteria filter, appending them automatically.
+- **Manual Trades**: Manual candidates (such as active live trades like `AKEUSDT`) can be directly added to `active_watchlist.json` in S3.
+- **Execution Safeguard ($N = 15$)**: If the watchlist expands beyond 15 coins, `auto_logger.py` logs a clear warning and caps processing at the 15 most recently added candidates to guarantee completion well within Lambda's 60-second execution timeout.
 
 ### How to Check Logs & Data:
-1. **List S3 Snapshots**:
+1. **View Active Watchlist**:
+   ```bash
+   aws s3 cp s3://pump-short-scanner-logs-dhanraj-7938/active_watchlist.json -
+   ```
+2. **List Daily Rank Snapshots**:
+   ```bash
+   aws s3 ls s3://pump-short-scanner-logs-dhanraj-7938/rank_history/
+   ```
+3. **List 4-Hourly Derivative Snapshots**:
    ```bash
    aws s3 ls s3://pump-short-scanner-logs-dhanraj-7938/snapshots/ --recursive
    ```
-2. **Download & View a Snapshot**:
+4. **Download & View Latest Snapshot**:
    ```bash
-   aws s3 cp s3://pump-short-scanner-logs-dhanraj-7938/snapshots/2026-08-23/snapshot_20260823_134613.csv -
+   aws s3 cp s3://pump-short-scanner-logs-dhanraj-7938/snapshots/YYYY-MM-DD/<snapshot_file>.csv -
    ```
-3. **Check CloudWatch Logs**:
+5. **Check CloudWatch Logs**:
    ```bash
+   aws logs tail /aws/lambda/pump-short-scanner-rank-tracker --follow
    aws logs tail /aws/lambda/pump-short-scanner-auto-logger --follow
-   ```
-
-### 📝 Updating the Candidate List:
-Currently, the forward-test candidate list is defined in `FORWARD_TEST_CANDIDATES` within [`scanner/auto_logger.py`](file:///c:/Users/HP/Desktop/pump-short-scanner/scanner/auto_logger.py). When you identify new candidates from `main.py`:
-1. Update `FORWARD_TEST_CANDIDATES` in `scanner/auto_logger.py`.
-2. Repackage and update the Lambda function code:
-   ```bash
-   # Package
-   python -c "import os, shutil, subprocess, zipfile; pkg='lambda_pkg'; os.makedirs(pkg, exist_ok=True); subprocess.run(['pip', 'install', '--platform', 'manylinux2014_x86_64', '--target', pkg, '--only-binary=:all:', '--python-version', '3.12', 'requests']); shutil.copy('scanner/auto_logger.py', os.path.join(pkg, 'auto_logger.py')); shutil.make_archive('function', 'zip', pkg); shutil.rmtree(pkg)"
-   # Deploy update
-   aws lambda update-function-code --function-name pump-short-scanner-auto-logger --zip-file fileb://function.zip --region ap-south-1
    ```
 
 ---
@@ -122,5 +144,6 @@ Currently, the forward-test candidate list is defined in `FORWARD_TEST_CANDIDATE
 - [x] Tradeable volume floor on Top 30-Day Gainers ($1M USD)
 - [x] Multi-Exchange Forward-Test Auto-Logger (`Binance`, `Bybit`, `OKX`)
 - [x] Serverless AWS 24/7 Deployment (Lambda + S3 + EventBridge every 4 hours)
-- [ ] Forward-test data collection across exchanges (1–2 weeks)
-- [ ] Cross-exchange OI/funding divergence analysis
+- [x] Dynamic S3 Watchlist & Daily CoinGecko Top-200 Rank Tracker (Job 1)
+- [x] 28-Day Empirical Forward-Test Dataset & Trajectory Analysis (Aug 23 – Sep 20, 2026)
+- [ ] Automated OI rollover and top-detection alerts

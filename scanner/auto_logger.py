@@ -45,24 +45,19 @@ logger = logging.getLogger(__name__)
 # File & S3 Paths
 LOG_FILE_PATH = Path(__file__).resolve().parent.parent / "data" / "oi_funding_manual_log.csv"
 LOG_BUCKET_NAME = os.environ.get("LOG_BUCKET_NAME")
+WATCHLIST_KEY = "active_watchlist.json"
+MAX_WATCHLIST_PROCESSING_CAP = 15  # Safe cap to guarantee completion within 60s Lambda timeout
 
 # ==============================================================================
-# FORWARD-TEST CANDIDATE COINS (Placeholder list)
+# DEFAULT FALLBACK CANDIDATES (Used only if S3 & local watchlist are unreachable)
 # ==============================================================================
-# Update or expand this list as candidates are discovered from main.py scanner.
-# By default, exchange symbols are generated automatically, or specified explicitly.
-FORWARD_TEST_CANDIDATES: List[Dict[str, Any]] = [
+# DOGE is removed per specification.
+DEFAULT_FALLBACK_CANDIDATES: List[Dict[str, Any]] = [
     {
         "coin": "BOME",
         "binance_symbol": "BOMEUSDT",
         "bybit_symbol": "BOMEUSDT",
         "okx_symbol": "BOME-USDT-SWAP",
-    },
-    {
-        "coin": "DOGE",
-        "binance_symbol": "DOGEUSDT",
-        "bybit_symbol": "DOGEUSDT",
-        "okx_symbol": "DOGE-USDT-SWAP",
     },
     {
         "coin": "BTW",
@@ -77,6 +72,59 @@ FORWARD_TEST_CANDIDATES: List[Dict[str, Any]] = [
         "okx_symbol": "AKE-USDT-SWAP",
     },
 ]
+
+
+def load_watchlist(bucket_name: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Load candidate coins dynamically from active_watchlist.json in S3 or local file.
+    Applies safeguard cap if watchlist exceeds MAX_WATCHLIST_PROCESSING_CAP.
+    """
+    target_bucket = bucket_name or os.environ.get("LOG_BUCKET_NAME")
+    loaded_coins: Optional[List[Dict[str, Any]]] = None
+
+    # 1. Attempt loading from S3
+    if boto3 and target_bucket:
+        try:
+            s3 = boto3.client("s3")
+            resp = s3.get_object(Bucket=target_bucket, Key=WATCHLIST_KEY)
+            data = json.loads(resp["Body"].read().decode("utf-8"))
+            loaded_coins = data.get("coins", [])
+            logger.info("Loaded %d candidate(s) from s3://%s/%s", len(loaded_coins), target_bucket, WATCHLIST_KEY)
+        except Exception as e:
+            logger.warning("Could not load watchlist from S3 (%s). Checking local fallback...", e)
+
+    # 2. Attempt loading from local active_watchlist.json
+    local_path = Path(__file__).resolve().parent.parent / "data" / "active_watchlist.json"
+    if loaded_coins is None and local_path.exists():
+        try:
+            with open(local_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                loaded_coins = data.get("coins", [])
+                logger.info("Loaded %d candidate(s) from local %s", len(loaded_coins), local_path.name)
+        except Exception as e:
+            logger.warning("Could not read local active_watchlist.json: %s", e)
+
+    # 3. Fallback if both S3 and local file are unavailable
+    candidates = loaded_coins if loaded_coins is not None else DEFAULT_FALLBACK_CANDIDATES
+
+    # 4. Safeguard: protect against Lambda 60s execution timeout and rate limits
+    if len(candidates) > MAX_WATCHLIST_PROCESSING_CAP:
+        print(f"\n[!] WARNING: Watchlist contains {len(candidates)} coins, exceeding safety threshold of {MAX_WATCHLIST_PROCESSING_CAP}.")
+        print(f"[!] Capping processing to the {MAX_WATCHLIST_PROCESSING_CAP} most recently added coins to prevent Lambda execution timeout.\n")
+        logger.warning(
+            "Watchlist size (%d) exceeds cap (%d). Processing top %d most recently added.",
+            len(candidates),
+            MAX_WATCHLIST_PROCESSING_CAP,
+            MAX_WATCHLIST_PROCESSING_CAP,
+        )
+        sorted_candidates = sorted(
+            candidates,
+            key=lambda c: c.get("added_at", ""),
+            reverse=True,
+        )
+        candidates = sorted_candidates[:MAX_WATCHLIST_PROCESSING_CAP]
+
+    return candidates
 
 
 class BinanceFuturesClient:
@@ -401,8 +449,8 @@ def run_auto_logger(
     If bucket_name (or LOG_BUCKET_NAME env var) is provided, uploads snapshot to S3.
     Otherwise, appends to local data/oi_funding_manual_log.csv.
     """
-    target_candidates = candidates or FORWARD_TEST_CANDIDATES
     target_bucket = bucket_name or os.environ.get("LOG_BUCKET_NAME")
+    target_candidates = candidates if candidates is not None else load_watchlist(bucket_name=target_bucket)
 
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 

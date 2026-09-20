@@ -1,0 +1,41 @@
+{
+  "updated_at": "2026-09-20T13:51:46Z",
+  "coins": [
+    {
+      "coin": "BOME",
+      "binance_symbol": "BOMEUSDT",
+      "bybit_symbol": "BOMEUSDT",
+      "okx_symbol": "BOME-USDT-SWAP",
+      "added_at": "2026-08-23T13:43:41Z",
+      "source": "manual_seed",
+      "matched_criteria": [
+        "Initial manual candidate"
+      ]
+    },
+    {
+      "coin": "BTW",
+      "binance_symbol": "BTWUSDT",
+      "bybit_symbol": "BTWUSDT",
+      "okx_symbol": "BTW-USDT-SWAP",
+      "added_at": "2026-08-23T13:43:41Z",
+      "source": "manual_seed",
+      "matched_criteria": [
+        "Initial manual candidate",
+        "45.5x ATH multiple",
+        "Market cap > $500M"
+      ]
+    },
+    {
+      "coin": "AKE",
+      "binance_symbol": "AKEUSDT",
+      "bybit_symbol": "AKEUSDT",
+      "okx_symbol": "AKE-USDT-SWAP",
+      "added_at": "2026-09-20T13:51:46Z",
+      "source": "manual_trade",
+      "matched_criteria": [
+        "Active live short position",
+        "Severe negative funding rate dislocation"
+      ]
+    }
+  ]
+}

@@ -4,6 +4,23 @@ A running, plain-language history of all changes made to the Pump Short Scanner 
 
 ---
 
+## [2026-09-20] - Feature: Dynamic Top-200 Rank Tracker (Job 1) & S3 Watchlist Integration (Job 2)
+
+### Added
+- **Daily Top-200 Rank Tracker (`scanner/rank_tracker.py` - Job 1)**:
+  - Fetches CoinGecko Top 200 coins daily and records dated snapshots in `s3://pump-short-scanner-logs-dhanraj-7938/rank_history/YYYY-MM-DD.json`.
+  - Compares today's Top 200 against prior day's baseline to identify newly entered coins.
+  - Automatically screens new entrants against the 4 pump-short filter criteria (`market_cap >= $500M`, `fdv >= $1B`, and `10x ATH` or `5x 30d`).
+  - Automatically appends matching candidates to `s3://pump-short-scanner-logs-dhanraj-7938/active_watchlist.json`.
+  - Deployed as AWS Lambda `pump-short-scanner-rank-tracker` triggered daily via EventBridge (`rate(1 day)`).
+- **Dynamic Watchlist Loading & Safeguard (`scanner/auto_logger.py` - Job 2)**:
+  - Upgraded derivative logger to pull candidates dynamically from `active_watchlist.json` in S3 with local fallback.
+  - Seeded initial watchlist with `BOME`, `BTW`, and `AKE` (manually removed `DOGE`).
+  - Added safe processing cap ($N = 15$) to prevent Lambda 60s timeout if the watchlist grows.
+  - Updated IAM role permissions to include `s3:GetObject` and `s3:ListBucket`.
+
+---
+
 ## [2026-09-20] - Feature & Analysis: Forward-Test Analysis & AKE Candidate Addition
 
 ### Added
