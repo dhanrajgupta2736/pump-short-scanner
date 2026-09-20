@@ -74,9 +74,12 @@ class Top1000RankTracker:
 
         return raw_coins
 
-    def save_rank_snapshot(self, date_str: str, now_iso: str, coins: List[Dict[str, Any]]) -> str:
-        """Store the top 1000 rank snapshot to S3."""
-        key = f"{RANK_HISTORY_PREFIX}{date_str}.json"
+    def save_rank_snapshot(self, now_dt: datetime, coins: List[Dict[str, Any]]) -> str:
+        """Store the top 1000 rank snapshot to S3 with a timestamped key."""
+        date_str = now_dt.strftime("%Y-%m-%d")
+        time_str = now_dt.strftime("%H%M%S")
+        now_iso = now_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        key = f"{RANK_HISTORY_PREFIX}{date_str}_{time_str}.json"
         payload = {
             "date": date_str,
             "timestamp": now_iso,
@@ -108,49 +111,36 @@ class Top1000RankTracker:
             logger.info("Local run: skipping S3 rank history upload (no s3 client).")
         return key
 
-    def load_prior_rank_snapshot(self, today_date_str: str) -> Tuple[Optional[str], Set[str]]:
+    def load_prior_rank_snapshot(self, exclude_key: Optional[str] = None) -> Tuple[Optional[str], Set[str]]:
         """
-        Load prior rank snapshot (yesterday's or most recent prior date) from S3.
-        Returns (prior_date_str, set_of_coin_ids).
+        Load the most recent prior rank snapshot from S3.
+        Finds the newest snapshot in rank_history/ (excluding exclude_key).
+        Returns (prior_timestamp_or_date, set_of_coin_ids).
         """
         if not self.s3_client or not self.bucket_name:
             return None, set()
 
-        # 1. Attempt yesterday's exact date
-        today_dt = datetime.strptime(today_date_str, "%Y-%m-%d")
-        yesterday_str = (today_dt - timedelta(days=1)).strftime("%Y-%m-%d")
-        yesterday_key = f"{RANK_HISTORY_PREFIX}{yesterday_str}.json"
-
-        try:
-            resp = self.s3_client.get_object(Bucket=self.bucket_name, Key=yesterday_key)
-            data = json.loads(resp["Body"].read().decode("utf-8"))
-            coin_ids = {c["id"] for c in data.get("coins", []) if "id" in c}
-            logger.info("Loaded yesterday's rank snapshot from s3://%s/%s (%d coins)", self.bucket_name, yesterday_key, len(coin_ids))
-            return yesterday_str, coin_ids
-        except ClientError as e:
-            if e.response["Error"]["Code"] != "NoSuchKey":
-                logger.warning("Error fetching %s: %s", yesterday_key, e)
-
-        # 2. If yesterday's file does not exist, find the most recent prior snapshot in rank_history/
         try:
             paginator = self.s3_client.get_paginator("list_objects_v2")
             pages = paginator.paginate(Bucket=self.bucket_name, Prefix=RANK_HISTORY_PREFIX)
-            keys = []
+            candidates = []
             for page in pages:
                 for obj in page.get("Contents", []):
                     k = obj["Key"]
-                    if k.endswith(".json") and k != f"{RANK_HISTORY_PREFIX}{today_date_str}.json":
-                        keys.append(k)
+                    if k.endswith(".json") and k != exclude_key:
+                        candidates.append((k, obj.get("LastModified")))
 
-            keys.sort()
-            if keys:
-                latest_prior_key = keys[-1]
+            if candidates:
+                # Sort by Key and LastModified to find the most recent prior snapshot
+                # Standard YYYY-MM-DD_HHMMSS sorts chronologically.
+                candidates.sort(key=lambda item: (item[0], item[1]))
+                latest_prior_key = candidates[-1][0]
                 resp = self.s3_client.get_object(Bucket=self.bucket_name, Key=latest_prior_key)
                 data = json.loads(resp["Body"].read().decode("utf-8"))
-                prior_date = data.get("date", latest_prior_key.replace(RANK_HISTORY_PREFIX, "").replace(".json", ""))
+                prior_label = data.get("timestamp") or data.get("date") or latest_prior_key.replace(RANK_HISTORY_PREFIX, "").replace(".json", "")
                 coin_ids = {c["id"] for c in data.get("coins", []) if "id" in c}
-                logger.info("Found prior snapshot s3://%s/%s from %s (%d coins)", self.bucket_name, latest_prior_key, prior_date, len(coin_ids))
-                return prior_date, coin_ids
+                logger.info("Loaded most recent prior snapshot s3://%s/%s from %s (%d coins)", self.bucket_name, latest_prior_key, prior_label, len(coin_ids))
+                return prior_label, coin_ids
         except Exception as e:
             logger.warning("Could not search for prior rank snapshots: %s", e)
 
@@ -209,13 +199,13 @@ class Top1000RankTracker:
             logger.warning("Could not write local watchlist: %s", e)
 
     def run(self) -> Dict[str, Any]:
-        """Execute the daily rank tracking and candidate screening cycle across Top 1000."""
+        """Execute the 6-hourly rank tracking and candidate screening cycle across Top 1000."""
         now_dt = datetime.now(timezone.utc)
         today_str = now_dt.strftime("%Y-%m-%d")
         now_iso = now_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
         print("=" * 85)
-        print("  🔍 DAILY COINGECKO TOP-1000 RANK TRACKER & PUMP SHORT SCREENER")
+        print("  🔍 6-HOURLY COINGECKO TOP-1000 RANK TRACKER & PUMP SHORT SCREENER")
         print("=" * 85)
         print(f"Timestamp (UTC) : {now_iso}")
         print(f"Date            : {today_str}")
@@ -227,22 +217,22 @@ class Top1000RankTracker:
         today_coins = self.fetch_current_top_1000()
         print(f"[+] Successfully fetched {len(today_coins)} coins in Top 1000.")
 
-        # 2. Save today's snapshot to S3
-        snapshot_key = self.save_rank_snapshot(today_str, now_iso, today_coins)
+        # 2. Save current snapshot to S3
+        snapshot_key = self.save_rank_snapshot(now_dt, today_coins)
 
-        # 3. Load prior day's rank snapshot
-        prior_date, prior_coin_ids = self.load_prior_rank_snapshot(today_str)
+        # 3. Load most recent prior rank snapshot (excluding current snapshot)
+        prior_baseline, prior_coin_ids = self.load_prior_rank_snapshot(exclude_key=snapshot_key)
 
         new_entrants: List[Dict[str, Any]] = []
         if prior_coin_ids:
-            print(f"[+] Comparing today's Top 1000 with baseline from {prior_date} ({len(prior_coin_ids)} coins)...")
+            print(f"[+] Comparing current Top 1000 with most recent prior baseline from {prior_baseline} ({len(prior_coin_ids)} coins)...")
             for coin in today_coins:
                 if coin["id"] not in prior_coin_ids:
                     new_entrants.append(coin)
             print(f"[+] Found {len(new_entrants)} newly entered coin(s) in Top 1000.")
         else:
-            print("[i] Baseline run: Prior snapshot was Top 200 or first run. Establishing Top 1000 baseline.")
-            print("[i] Future daily runs will compare against today's full Top 1000 snapshot.")
+            print("[i] Baseline run: No prior snapshot available for delta comparison.")
+            print("[i] Future 6-hour runs will compare against today's snapshot.")
 
         # 4. Filter newly entered coins through 4 pump-short criteria
         passing_candidates: List[Dict[str, Any]] = []
@@ -321,11 +311,13 @@ class Top1000RankTracker:
             "date": today_str,
             "timestamp": now_iso,
             "top_1000_count": len(today_coins),
-            "prior_baseline_date": prior_date,
+            "prior_baseline": prior_baseline,
+            "prior_baseline_date": prior_baseline,
             "new_entrants_count": len(new_entrants),
             "passing_candidates_count": len(passing_candidates),
             "added_to_watchlist": [c["coin"] for c in added_coins],
             "total_watchlist_coins": len(existing_coins),
+            "snapshot_key": snapshot_key,
         }
 
 
@@ -334,7 +326,7 @@ Top200RankTracker = Top1000RankTracker
 
 
 def lambda_handler(event: Optional[Dict[str, Any]] = None, context: Any = None) -> Dict[str, Any]:
-    """AWS Lambda entry point for scheduled daily execution across Top 1000."""
+    """AWS Lambda entry point for scheduled 6-hourly execution across Top 1000."""
     logger.info("Rank Tracker Lambda started via EventBridge event: %s", json.dumps(event or {}))
     tracker = Top1000RankTracker()
     results = tracker.run()

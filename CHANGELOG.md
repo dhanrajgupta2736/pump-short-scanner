@@ -4,7 +4,18 @@ A running, plain-language history of all changes made to the Pump Short Scanner 
 
 ---
 
-## [2026-09-20] - Feature: Expand Rank Tracker to Top 1000 & Increase Lambda Timeout to 300s
+## [2026-09-20] - Feature: 6-Hourly Rank Tracker Schedule & Intra-Day Snapshot Diffing
+
+### Changed
+- **6-Hourly Execution Cadence (`pump-short-scanner-rank-tracker`)**:
+  - Shifted Job 1 EventBridge trigger (`pump-short-scanner-rank-tracker-schedule`) from daily (`rate(1 day)`) to every 6 hours (`rate(6 hours)`).
+  - Tightly hedges against rapid sub-24h flash pumps (e.g. `RAVE` and `CYS` historical pump windows) which could enter and exit the radar within a single day.
+- **Dynamic Prior Snapshot Diffing (`scanner/rank_tracker.py`)**:
+  - Replaced date-based snapshots (`rank_history/YYYY-MM-DD.json`) with run-timestamped snapshots (`rank_history/YYYY-MM-DD_HHMMSS.json`).
+  - Updated snapshot comparison logic to diff against the **most recent prior snapshot** in S3 (whether 6 hours ago today or from yesterday evening), preventing false comparisons against stale baselines and capturing intra-day entrants.
+- **Rate-Limit & Cost Analysis**:
+  - Confirmed 4 runs/day = 16 CoinGecko calls/day (~480/month), well within CoinGecko's Demo API 10,000 monthly quota.
+  - Confirmed Lambda compute consumes ~480 GB-seconds/month out of 400,000 free tier GB-seconds (0.12% utilization, $0.00/month).
 
 ### Added
 - **Top 1000 Discovery Scope (`scanner/rank_tracker.py` - Job 1)**:

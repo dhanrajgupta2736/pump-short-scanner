@@ -71,10 +71,10 @@ The system runs completely serverless on AWS across two coordinated jobs, incurr
 
 ```mermaid
 flowchart TD
-    subgraph Job 1: Candidate Discovery [Daily Trigger: rate 1 day]
+    subgraph Job 1: Candidate Discovery [6-Hour Trigger: rate 6 hours]
         CG[CoinGecko /coins/markets Top 1000] --> RT[Lambda: pump-short-scanner-rank-tracker]
-        S3_Hist_Old[(S3: rank_history/yesterday.json)] --> RT
-        RT --> S3_Hist_New[(S3: rank_history/today.json)]
+        S3_Hist_Old[(S3: rank_history/most_recent_prior.json)] --> RT
+        RT --> S3_Hist_New[(S3: rank_history/YYYY-MM-DD_HHMMSS.json)]
         RT --> Filter{4-Criteria Filter<br/>MCap > $500M<br/>FDV > $1B<br/>10x ATH or 5x 30d}
         Filter -- Qualified --> WL_Update[Append to Watchlist]
         S3_WL[(S3: active_watchlist.json)] --> WL_Update
@@ -83,7 +83,7 @@ flowchart TD
 
     subgraph Job 2: Derivative Logging [4-Hour Trigger: rate 4 hours]
         S3_WL --> AL[Lambda: pump-short-scanner-auto-logger]
-        AL --> Safeguard{Watchlist > 15 Coins?<br/>Cap at N=15 Recent}
+        Safeguard{Watchlist > 15 Coins?<br/>Cap at N=15 Recent}
         Safeguard --> FetchEx[Query Binance, Bybit, OKX<br/>Price, OI, Funding Rate]
         FetchEx --> S3_Snaps[(S3: snapshots/YYYY-MM-DD/)]
         FetchEx --> CW[CloudWatch Logs]
@@ -93,28 +93,29 @@ flowchart TD
 ### Deployed AWS Resources:
 - **AWS Region**: `ap-south-1` (Asia Pacific - Mumbai)
 - **S3 Bucket**: `pump-short-scanner-logs-dhanraj-7938` (Private, Block Public Access enabled)
-  - `active_watchlist.json`: Single source of truth for active forward-test candidates.
-  - `rank_history/YYYY-MM-DD.json`: Daily CoinGecko top-1000 market snapshots (4 pages $\times$ 250).
-  - `snapshots/YYYY-MM-DD/snapshot_YYYYMMDD_HHMMSS.csv`: 4-hourly derivative logs.
+- `active_watchlist.json`: Single source of truth for active forward-test candidates.
+- `rank_history/YYYY-MM-DD_HHMMSS.json`: 6-hourly CoinGecko top-1000 market snapshots (4 pages $\times$ 250).
+- `snapshots/YYYY-MM-DD/snapshot_YYYYMMDD_HHMMSS.csv`: 4-hourly derivative logs.
 - **Job 1 Lambda**: `pump-short-scanner-rank-tracker`
-  - Runtime: `Python 3.12` | Memory: `128 MB` | Timeout: `300s`
-  - Handler: `rank_tracker.lambda_handler`
-  - Schedule: `rate(1 day)` via EventBridge (`pump-short-scanner-rank-tracker-schedule`)
+- Runtime: `Python 3.12` | Memory: `128 MB` | Timeout: `300s`
+- Handler: `rank_tracker.lambda_handler`
+- Schedule: `rate(6 hours)` via EventBridge (`pump-short-scanner-rank-tracker-schedule`)
 - **Job 2 Lambda**: `pump-short-scanner-auto-logger`
-  - Runtime: `Python 3.12` | Memory: `128 MB` | Timeout: `60s`
-  - Handler: `auto_logger.lambda_handler`
-  - Schedule: `rate(4 hours)` via EventBridge (`pump-short-scanner-auto-logger-schedule`)
+- Runtime: `Python 3.12` | Memory: `128 MB` | Timeout: `60s`
+- Handler: `auto_logger.lambda_handler`
+- Schedule: `rate(4 hours)` via EventBridge (`pump-short-scanner-auto-logger-schedule`)
 - **IAM Role**: `pump-short-scanner-lambda-role` (Scoped strictly to `s3:GetObject`, `s3:PutObject`, and `s3:ListBucket` on the bucket + CloudWatch Logs)
 
-### Scope Realignment & Historical Trade Analysis (Top 1000 vs. Top 200):
-Empirical analysis of our 8 original trade-history assets (`DEXE`, `RAVE`, `LAB`, `BILL`, `BEAT`, `VELVET`, `CYS`, `AKE`) revealed two critical findings:
+### Scope Realignment & 6-Hourly Tracking Rationale:
+Empirical analysis of our 8 original trade-history assets (`DEXE`, `RAVE`, `LAB`, `BILL`, `BEAT`, `VELVET`, `CYS`, `AKE`) revealed two critical operational realities:
 1. **Massive Post-Pump Mean Reversion**: At their historical pump peaks, all 8 assets reached valuations high enough to briefly enter the Top 200 (e.g. `RAVE` hit $7.6B, `DEXE` hit $1.76B, `VELVET` hit $578M). However, once the pump concluded, they crashed by **85% to 99%**, causing 7 of the 8 to sit in the **Rank 350 to 800** bracket today.
-2. **Flash Pump Window Risks**: Several parabolic pumps (e.g. `RAVE` and `CYS`) peaked and began reversing within **24 to 48 hours**. A narrow Top-200 net risks missing coins that enter and exit the Top 200 between daily runs.
-By scanning the entire **Top 1000** (matching `main.py`), Job 1 detects candidate moves earlier in their ascent and retains them on the radar throughout their cycle.
+2. **Flash Pump Window Risks (Sub-24h Peaks)**: Several parabolic pumps (e.g. `RAVE` and `CYS`) peaked and began reversing within **24 hours**. A once-daily run risks missing coins that surge and mean-revert between snapshots.
+3. **6-Hourly Diff Baseline**: By running every 6 hours, each invocation saves a timestamped snapshot (`rank_history/YYYY-MM-DD_HHMMSS.json`) and compares against the **most recent prior snapshot** (whether 6 hours ago today or from the previous evening). This ensures intra-day flash entrants are captured rather than missed.
+4. **Cost & API Limits**: 4 runs/day = 16 calls/day (~480 calls/month), remaining well below CoinGecko's Demo API 10,000 monthly quota, and consuming only ~480 GB-seconds of AWS Lambda compute per month (0.12% of the free tier).
 
 ### Managing the Active Watchlist:
 `active_watchlist.json` stores all candidates currently tracked for derivative logging.
-- **Automated**: Job 1 checks daily for coins newly entering CoinGecko's Top 200 that meet the 4-criteria filter, appending them automatically.
+- **Automated**: Job 1 checks every 6 hours for coins newly entering CoinGecko's Top 1000 that meet the 4-criteria filter, appending them automatically.
 - **Manual Trades**: Manual candidates (such as active live trades like `AKEUSDT`) can be directly added to `active_watchlist.json` in S3.
 - **Execution Safeguard ($N = 15$)**: If the watchlist expands beyond 15 coins, `auto_logger.py` logs a clear warning and caps processing at the 15 most recently added candidates to guarantee completion well within Lambda's 60-second execution timeout.
 
