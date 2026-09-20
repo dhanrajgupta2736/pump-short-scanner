@@ -72,7 +72,7 @@ The system runs completely serverless on AWS across two coordinated jobs, incurr
 ```mermaid
 flowchart TD
     subgraph Job 1: Candidate Discovery [Daily Trigger: rate 1 day]
-        CG[CoinGecko /coins/markets Top 200] --> RT[Lambda: pump-short-scanner-rank-tracker]
+        CG[CoinGecko /coins/markets Top 1000] --> RT[Lambda: pump-short-scanner-rank-tracker]
         S3_Hist_Old[(S3: rank_history/yesterday.json)] --> RT
         RT --> S3_Hist_New[(S3: rank_history/today.json)]
         RT --> Filter{4-Criteria Filter<br/>MCap > $500M<br/>FDV > $1B<br/>10x ATH or 5x 30d}
@@ -94,10 +94,10 @@ flowchart TD
 - **AWS Region**: `ap-south-1` (Asia Pacific - Mumbai)
 - **S3 Bucket**: `pump-short-scanner-logs-dhanraj-7938` (Private, Block Public Access enabled)
   - `active_watchlist.json`: Single source of truth for active forward-test candidates.
-  - `rank_history/YYYY-MM-DD.json`: Daily CoinGecko top-200 market snapshots.
+  - `rank_history/YYYY-MM-DD.json`: Daily CoinGecko top-1000 market snapshots (4 pages $\times$ 250).
   - `snapshots/YYYY-MM-DD/snapshot_YYYYMMDD_HHMMSS.csv`: 4-hourly derivative logs.
 - **Job 1 Lambda**: `pump-short-scanner-rank-tracker`
-  - Runtime: `Python 3.12` | Memory: `128 MB` | Timeout: `120s`
+  - Runtime: `Python 3.12` | Memory: `128 MB` | Timeout: `300s`
   - Handler: `rank_tracker.lambda_handler`
   - Schedule: `rate(1 day)` via EventBridge (`pump-short-scanner-rank-tracker-schedule`)
 - **Job 2 Lambda**: `pump-short-scanner-auto-logger`
@@ -105,6 +105,12 @@ flowchart TD
   - Handler: `auto_logger.lambda_handler`
   - Schedule: `rate(4 hours)` via EventBridge (`pump-short-scanner-auto-logger-schedule`)
 - **IAM Role**: `pump-short-scanner-lambda-role` (Scoped strictly to `s3:GetObject`, `s3:PutObject`, and `s3:ListBucket` on the bucket + CloudWatch Logs)
+
+### Scope Realignment & Historical Trade Analysis (Top 1000 vs. Top 200):
+Empirical analysis of our 8 original trade-history assets (`DEXE`, `RAVE`, `LAB`, `BILL`, `BEAT`, `VELVET`, `CYS`, `AKE`) revealed two critical findings:
+1. **Massive Post-Pump Mean Reversion**: At their historical pump peaks, all 8 assets reached valuations high enough to briefly enter the Top 200 (e.g. `RAVE` hit $7.6B, `DEXE` hit $1.76B, `VELVET` hit $578M). However, once the pump concluded, they crashed by **85% to 99%**, causing 7 of the 8 to sit in the **Rank 350 to 800** bracket today.
+2. **Flash Pump Window Risks**: Several parabolic pumps (e.g. `RAVE` and `CYS`) peaked and began reversing within **24 to 48 hours**. A narrow Top-200 net risks missing coins that enter and exit the Top 200 between daily runs.
+By scanning the entire **Top 1000** (matching `main.py`), Job 1 detects candidate moves earlier in their ascent and retains them on the radar throughout their cycle.
 
 ### Managing the Active Watchlist:
 `active_watchlist.json` stores all candidates currently tracked for derivative logging.

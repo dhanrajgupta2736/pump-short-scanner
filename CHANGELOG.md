@@ -4,6 +4,18 @@ A running, plain-language history of all changes made to the Pump Short Scanner 
 
 ---
 
+## [2026-09-20] - Feature: Expand Rank Tracker to Top 1000 & Increase Lambda Timeout to 300s
+
+### Added
+- **Top 1000 Discovery Scope (`scanner/rank_tracker.py` - Job 1)**:
+  - Widened daily rank tracking from Top 200 to Top 1000 by reusing `CoinGeckoClient` 4-page pagination (4 pages x 250 coins).
+  - Informed by historical trade analysis (`DEXE`, `RAVE`, `LAB`, `BILL`, `BEAT`, `VELVET`, `CYS`) which showed that while all 8 historical coins reached Top 200 valuations during peak pump, 7 crashed by 85% to 99% into the Rank 350 to 800 zone post-pump.
+  - Mitigates flash pump miss risks for fast moves (<24h to 48h) by tracking coins across the entire Top 1000.
+  - Increased Lambda timeout on `pump-short-scanner-rank-tracker` from 120s to 300s (5 minutes) to comfortably accommodate CoinGecko 429 backoff retries.
+  - Verified live AWS execution (1,000 coins fetched and stored to `rank_history/2026-09-20.json` in 31.5s).
+
+---
+
 ## [2026-09-20] - Feature: Dynamic Top-200 Rank Tracker (Job 1) & S3 Watchlist Integration (Job 2)
 
 ### Added
