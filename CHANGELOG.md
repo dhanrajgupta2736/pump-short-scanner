@@ -4,6 +4,19 @@ A running, plain-language history of all changes made to the Pump Short Scanner 
 
 ---
 
+## [2026-09-20] - Feature & Analysis: Forward-Test Analysis & AKE Candidate Addition
+
+### Added
+- **New Forward-Test Candidate (`AKE`)**:
+  - Added `AKE` (`AKEUSDT` on Binance/Bybit, `AKE-USDT-SWAP` on OKX) to `FORWARD_TEST_CANDIDATES` in `scanner/auto_logger.py`.
+  - Packaged and redeployed updated function code to AWS Lambda (`pump-short-scanner-auto-logger`).
+  - Verified live execution logging 11 records per run across Binance, Bybit, and OKX into Amazon S3.
+- **Consolidated Forward-Test Dataset & Visualization**:
+  - Downloaded and consolidated 173 continuous 4-hour snapshots (Aug 23 - Sep 20, 2026) into `data/consolidated_forward_test_log.csv`.
+  - Generated visual trajectory charts for `BTW`, `BOME`, and `DOGE` in `data/`.
+
+---
+
 ## [2026-08-25] - Analysis: Binance Funding Rate Mechanism & Audit Verification
 
 ### Investigated

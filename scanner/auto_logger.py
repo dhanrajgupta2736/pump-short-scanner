@@ -70,6 +70,12 @@ FORWARD_TEST_CANDIDATES: List[Dict[str, Any]] = [
         "bybit_symbol": "BTWUSDT",
         "okx_symbol": "BTW-USDT-SWAP",
     },
+    {
+        "coin": "AKE",
+        "binance_symbol": "AKEUSDT",
+        "bybit_symbol": "AKEUSDT",
+        "okx_symbol": "AKE-USDT-SWAP",
+    },
 ]
 
 
