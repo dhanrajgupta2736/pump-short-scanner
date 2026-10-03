@@ -4,7 +4,16 @@ A running, plain-language history of all changes made to the Pump Short Scanner 
 
 ---
 
-## [2026-09-20] - Feature: 6-Hourly Rank Tracker Schedule & Intra-Day Snapshot Diffing
+## [2026-10-03] - Research: 14-Token Historical Squeeze Autopsy & Quantitative Prediction Model
+
+### Added
+- **14-Token Historical Squeeze Dataset (`data/historical_pump_research_14_tokens.json` & `.csv`)**:
+  - Compiled exhaustive quantitative metrics across 14 violent historical pump-and-dump short squeezes: `MemeCore (M)`, `RAVE`, `BILL`, `LAB`, `DEXE`, `BEAT`, `VELVET`, `CYS`, `AKE`, `TRB`, `UNFI`, `GAS`, `LOOM`, and `BLZ`.
+  - Audited multi-exchange peak prices (Binance, Bybit, Gate.io, MEXC, Bitget), circulating floats, peak Market Caps, peak FDVs, volume blow-off spikes, upper rejection wicks, funding clamps, and 6h/24h crash velocities.
+  - Saved as structured dataset in both JSON and CSV in `data/`, with comprehensive markdown report artifact.
+- **BTW (Bitway) Advanced Price & Liquidation Forecast**:
+  - Matched BTW's 27.1% float against low-float peer group (`RAVE`, `BILL`, `MemeCore`, `AKE`).
+  - Mapped conservative, primary, and liquidation wick targets ($1.45 to $2.05) and downside mean reversion targets ($0.15 to $0.35).
 
 ### Changed
 - **6-Hourly Execution Cadence (`pump-short-scanner-rank-tracker`)**:
