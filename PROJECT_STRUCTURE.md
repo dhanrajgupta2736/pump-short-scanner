@@ -9,6 +9,7 @@ pump-short-scanner/
 ├── CHANGELOG.md                  # Running chronological log of all changes and rationale
 ├── PROJECT_STRUCTURE.md          # Overview of codebase layout and file responsibilities
 ├── README.md                     # Project documentation, setup, and 24/7 AWS deployment guide
+├── ROADMAP_NEXT_GEN_PLATFORM.md  # Master roadmap: Dashboard, Telegram/WhatsApp alerts, on-chain, arb
 ├── config.py                     # Central configuration constants, thresholds, and target lists
 ├── main.py                       # CLI entry point: scans Top 1000 coins and displays filtered candidates
 ├── requirements.txt              # Python package dependencies (requests, boto3)
@@ -28,6 +29,7 @@ pump-short-scanner/
 
 ### Root Directory
 - **`README.md`**: Project mission, 4-criteria rules, scanner execution, and AWS Serverless 24/7 deployment guide.
+- **`ROADMAP_NEXT_GEN_PLATFORM.md`**: Master architecture and implementation roadmap for the web dashboard, Telegram/WhatsApp alerts, on-chain analytics, and funding arbitrage engine.
 - **`PROJECT_STRUCTURE.md`**: This document, outlining the structural blueprint of the project.
 - **`CHANGELOG.md`**: Plain-language dated history of project features, updates, and fixes.
 - **`config.py`**: Declares user-configurable thresholds:

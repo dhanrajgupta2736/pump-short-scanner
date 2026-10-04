@@ -4,6 +4,23 @@ A running, plain-language history of all changes made to the Pump Short Scanner 
 
 ---
 
+## [2026-10-04] - Research & Strategy: 15-Token Database, BTW Climax Verification & Next-Gen Roadmap
+
+### Added
+- **Token #15 Added (`MYX Finance`) (`data/historical_pump_research_15_tokens.json` & `.csv`)**:
+  - Incorporated full quantitative autopsy of MYX Finance: 23.5% float, 247x pump from $0.077 to $18.6500 (Binance Futures) / $19.03 (CoinGecko ATH), peak MCap of $4.48B, peak FDV of $19.03B, clamped -2.0000% funding rate climax, and subsequent -99.6% wipeout to $0.072.
+  - Validated the universal $18.5B–$19.0B FDV glass ceiling across low-float cartel tokens (`AKE` $18.56B, `MYX` $19.03B, `BTW` $17.66B).
+- **Master Implementation Roadmap (`ROADMAP_NEXT_GEN_PLATFORM.md`)**:
+  - Defined post-BTW crash milestone (<$0.10 trigger) for initiating full platform build.
+  - Mapped Phase 1: Real-time web scanner dashboard + Telegram & WhatsApp alerting engine with comprehensive signal payloads (reason, OI, cross-exchange funding, exact position strategy).
+  - Mapped Phase 2: Dual-direction on-chain whale flow tracking (supply starvation for longs, exchange deposit prep for shorts).
+  - Mapped Phase 3: Parallel cross-exchange funding rate differential and delta-neutral arbitrage engine.
+- **BTW Climax & Crash Verification**:
+  - Live market verified our Oct 3 forecast: BTW spiked into the exact predicted $1.75–$2.05 zone, topping at $1.7662 (00:30 UTC), followed by a -51.0% flash crash to $0.8646, breaking the $1.25 shelf on a $51.2M volume candle with $50M+ in long liquidations.
+  - Mapped the dead-cat bounce retest ($1.12–$1.25) and defined 3-phase downside targets ($0.35, $0.12, and $0.035).
+
+---
+
 ## [2026-10-03] - Research: 14-Token Historical Squeeze Autopsy & Quantitative Prediction Model
 
 ### Added
